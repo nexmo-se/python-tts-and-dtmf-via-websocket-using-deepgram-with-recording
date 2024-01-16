@@ -5,16 +5,16 @@ monkey.patch_all(ssl=False)
 from flask import Flask, request, jsonify
 from flask_sock import Sock
 from werkzeug.routing import Map, Rule
-import time, struct, math, json, io, traceback
+import time, struct, math, json, io, os
 import vonage
 from gtts import gTTS
 from pydub import AudioSegment
 app = Flask(__name__)
 sock = Sock(app)
-PORT = 3003
-
+PORT = int(os.getenv('PORT', 3003))
+APP_ID = "<YOUR_APP_ID>" #or set it in your environmental var APP_ID
 client = vonage.Client(
-    application_id="APPLICATION_ID",
+    application_id=os.getenv('APP_ID', APP_ID),
     private_key="private.key",
 )
 
@@ -171,5 +171,5 @@ def echo_socket(ws):
 
 if __name__ == "__main__":
     server = pywsgi.WSGIServer(("0.0.0.0", PORT), app)
+    print(f'Application with ID: {APP_ID} runninng on port {PORT}')
     server.serve_forever()
-
