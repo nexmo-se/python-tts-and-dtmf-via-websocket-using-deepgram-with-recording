@@ -14,7 +14,7 @@ client = vonage.Client(
 
 SHORT_NORMALIZE = (1.0/32768.0)
 swidth = 2
-Threshold = 10
+Threshold = 15
 TIMEOUT_LENGTH = 0.5 #The silent length we allow before cutting recognition
 
 def rms(frame): #Root mean Square: a function to check if the audio is silent. Commonly used in Audio stuff
@@ -158,6 +158,7 @@ async def echo_socket(ws: WebSocket):
                 out = sound.export(format="wav")
                 tts_dat = out.read()
                 out.close()
+                tts_dat = tts_dat[640:]
                 # chunk it and send it out
                 for i in range(0, len(tts_dat), 640):
                     chunk = (tts_dat[i:i+640])

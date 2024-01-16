@@ -154,6 +154,7 @@ def echo_socket(ws):
         tts_dat = out.read()
         out.close()
         # chunk it and send it out
+        tts_dat = tts_dat[640:]
         for i in range(0, len(tts_dat), 640):
             chunk = (tts_dat[i:i+640])
             ws.send(bytes(chunk))
