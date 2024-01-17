@@ -2,7 +2,9 @@
 # Python TTS and DTMF via websocket using Python GTTS Library with recording
 
 A sample app that shows how to use GTTS for TTS and how to record it.
+
 This sample also shows how to handle DTMF signals via Websocket.
+
 We have samples for Flask (`app.py`) and Fast API (`app_fast_api.py`)
 
 ## Running
