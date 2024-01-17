@@ -7,15 +7,12 @@ from pydub import AudioSegment
 app = FastAPI()
 
 APP_ID = "<YOUR_APP_ID>" #or set it in your environmental var APP_ID
-client = vonage.Client(
-    application_id=os.getenv('APP_ID', APP_ID),
-    private_key="private.key",
-)
 
 SHORT_NORMALIZE = (1.0/32768.0)
 swidth = 2
 Threshold = 15
 TIMEOUT_LENGTH = 0.5 #The silent length we allow before cutting recognition
+DTMF_TIMEOUT_LENGTH = 1 #The silent length we allow before we process the DTMF
 
 def rms(frame): #Root mean Square: a function to check if the audio is silent. Commonly used in Audio stuff
     count = len(frame) / swidth
@@ -36,7 +33,7 @@ def answer_call(request: Request):
     ncco = [
         {
             "action": "talk",
-            "text": "This is a Voice Echo test. Speak after the Ding.",
+            "text": "Voice Echo and DTMF test. Speak after the Ding.",
         },
         {
             "action": "record",
@@ -76,6 +73,10 @@ def record_events(request: Request):
     if recording_url == "":
         return "200"
     print("Using Recording URL", recording_url)
+    client = vonage.Client(
+        application_id=os.getenv('APP_ID', APP_ID),
+        private_key="private.key",
+    )
     response = client.voice.get_recording(recording_url)
     filename = f'recording_{str(int(time.time()))}.mp3'
 
@@ -87,12 +88,20 @@ def record_events(request: Request):
     return "200"
 
 @app.websocket("/socket")
-async def echo_socket(ws: WebSocket):
+async def echo_socket(ws: WebSocket):    
     await ws.accept()
-    rec = []
-    current = 1
-    end = 0
     uuid = ''
+
+    #Audio 
+    rec = []
+    audio_current = 1
+    audio_end = 0
+    
+    #DTMF
+    dtmf_stack = []
+    dtmf_current = 1
+    dtmf_end = 0
+    dtmf_received = None
 
     #This part sends a wav file called ding.wav
     #we open the wav file
@@ -119,7 +128,15 @@ async def echo_socket(ws: WebSocket):
         elif "text" in received:
             print("STR", received["text"])
             data = json.loads(received["text"])
-            uuid = data["uuid"]
+            if data["event"] == "websocket:connected":
+                uuid = data["uuid"]
+            
+            #if we received a DTMF
+            elif data["event"] == "websocket:dtmf":
+                #uuid = data["uuid"]
+                dtmf_received = data["digit"]\
+                .replace("#","hash key").replace("*","star") #comment this out if you don't need to replace # and *
+                print("DTMF_RECEIVED", dtmf_received)
             continue #if this is a string, we don't handle it
         else:
             continue #do nothing
@@ -127,21 +144,21 @@ async def echo_socket(ws: WebSocket):
     
         #If audio is loud enough, set the current timeout to now and end timeout to now + TIMEOUT_LENGTH
         #This will start the next part that stores the audio until it's quiet again
-        if rms_val > Threshold and not current <= end :
+        if rms_val > Threshold and not audio_current <= audio_end :
             print("Heard Something")
-            current = time.time()
-            end = time.time() + TIMEOUT_LENGTH
+            audio_current = time.time()
+            audio_end = time.time() + TIMEOUT_LENGTH
 
         #If levels are higher than threshold add audio to record array and move the end timeout to now + TIMEOUT_LENGTH
         #When the levels go lower than threshold, continue recording until timeout. 
         #By doing this, we only capture relevant audio and not continously call our STT/NLP with nonsensical sounds
         #By adding a trailing TIMEOUT_LENGTH we can capture natural pauses and make things not sound robotic
-        if current <= end: 
-            if rms_val >= Threshold: end = time.time() + TIMEOUT_LENGTH
-            current = time.time()
+        if audio_current <= audio_end: 
+            if rms_val >= Threshold: audio_end = time.time() + TIMEOUT_LENGTH
+            audio_current = time.time()
             rec.append(audio)
 
-            #process audio if we have an array of non-silent audio
+        #process audio if we have an array of non-silent audio
         else:
             if len(rec)>0: 
                 
@@ -173,5 +190,53 @@ async def echo_socket(ws: WebSocket):
                     chunk = (output_audio[i:i+640])
                     await ws.send_bytes(bytes(chunk))
                 
-                rec = [] #reset audio array to blank   
+                rec = [] #reset audio array to blank 
+        
+
+        #This parts handles DTMF input from users
+        #If there is a DTMF input, set the current dtmf timeout to now and dtmf end timeout to now + DTMF_TIMEOUT_LENGTH
+        #This will start the next part that stores the DTMF until no input is detected
+        if dtmf_received and not dtmf_current <= dtmf_end :
+            dtmf_current = time.time()
+            dtmf_end = time.time() + DTMF_TIMEOUT_LENGTH
+
+        #If no DTMF input for DTMF_TIMEOUT_LENGTH, append the dtmf_receved to our dtmf_stack
+        if dtmf_current <= dtmf_end: 
+            if dtmf_received: 
+                dtmf_end = time.time() + DTMF_TIMEOUT_LENGTH
+                dtmf_stack.append(dtmf_received)
+            dtmf_current = time.time()
+            dtmf_received = None
+
+        #process DTMF if we have an array of DTMF_STACK
+        else:
+            if len(dtmf_stack)>0: 
+                print("DTMF STACK",dtmf_stack)
+                dtmf = ','.join(dtmf_stack)
+                dtmf_stack = [] # reset dtmf_stack for next batch
+
+                #here you can do whatever you want with the DTMF, I'm letting the TTS speak the DTMF digits here
+                #Do TTS
+                tmp = io.BytesIO()
+                
+                tts = gTTS(text='DTMF Input is '+dtmf, lang='en')  
+                tts.write_to_fp(tmp)
+                tmp.seek(0)                       
+                sound = AudioSegment.from_mp3(tmp)
+                tmp.close()
+                #you have to assign the set_frame_rate to a variable as it does not modify in place
+                sound = sound.set_frame_rate(16000)
+                #we get the converted bytes
+                out = sound.export(format="wav")
+                tts_dat = out.read()
+                out.close()
+                tts_dat = tts_dat[640:]
+                # chunk it and send it out
+                for i in range(0, len(tts_dat), 640):
+                    chunk = (tts_dat[i:i+640])
+                    await ws.send_bytes(bytes(chunk))
+
+               
+                
+                
 
