@@ -2,8 +2,10 @@
 from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect
 import time, struct, math, json, io, os
 import vonage
-from gtts import gTTS
-from pydub import AudioSegment
+from deepgram_processor import dg
+dg = dg()
+
+
 app = FastAPI()
 
 APP_ID = "<YOUR_APP_ID>" #or set it in your environmental var APP_ID
@@ -33,7 +35,7 @@ def answer_call(request: Request):
     ncco = [
         {
             "action": "talk",
-            "text": "Voice Echo and DTMF test. Speak after the Ding.",
+            "text": "Loading Demo",
         },
         {
             "action": "record",
@@ -51,7 +53,9 @@ def answer_call(request: Request):
                     "uri": f'wss://{request.url.hostname}/socket'.format(request.url.hostname),
                     "content-type": "audio/l16;rate=16000",
                     "headers": {
-                        "uuid": uuid}
+                        "uuid": uuid,
+                        "tts-barge-in-on-dtmf-key":"any" #TTS stops if DTMF key received. Can be 0,1,2,3,4,5,6,7,8,9,*,# or any. Any means any key
+                    }
                 }
             ],
         }
@@ -63,7 +67,12 @@ def answer_call(request: Request):
 @app.post("/webhooks/call-event")
 async def events(request: Request):
     request_body = await request.receive()  # Assuming it's a text-based request body
-    print("Request Body:", request_body)
+    #print("Call Event Request Body:", request_body)
+    return "200"
+
+@app.post("/webhooks/rtc-event")
+async def events(request: Request):
+    request_body = await request.receive()  # Assuming it's a text-based request body
     return "200"
 
 @app.get("/webhooks/record-event")
@@ -88,10 +97,10 @@ def record_events(request: Request):
     return "200"
 
 @app.websocket("/socket")
-async def echo_socket(ws: WebSocket):    
+async def echo_socket(ws: WebSocket):
     await ws.accept()
+    dg.start() #start deepgram
     uuid = ''
-
     #Audio 
     rec = []
     audio_current = 1
@@ -102,6 +111,14 @@ async def echo_socket(ws: WebSocket):
     dtmf_current = 1
     dtmf_end = 0
     dtmf_received = None
+
+    #Do TTS
+    tts_dat = dg.speak("This is a Deepgram Speech to Text and Text to Speech with Voice Echo demo. Please speak after the ding.")
+    tts_dat = b''.join(tts_dat)
+    # chunk it and send it out
+    for i in range(0, len(tts_dat), 640): #we send out the audio buffers 640 bytes at a time                    
+        chunk = (tts_dat[i:i+640])
+        await ws.send_bytes(chunk)
 
     #This part sends a wav file called ding.wav
     #we open the wav file
@@ -119,6 +136,7 @@ async def echo_socket(ws: WebSocket):
         try:
             received = await ws.receive()
         except RuntimeError: #the connection has been closed at this point
+            dg.stop() #stop deepgram
             break
 
         audio = b"" #blank byte
@@ -137,6 +155,7 @@ async def echo_socket(ws: WebSocket):
                 dtmf_received = data["digit"]\
                 .replace("#","hash key").replace("*","star") #comment this out if you don't need to replace # and *
                 print("DTMF_RECEIVED", dtmf_received)
+                
             continue #if this is a string, we don't handle it
         else:
             continue #do nothing
@@ -156,33 +175,22 @@ async def echo_socket(ws: WebSocket):
         if audio_current <= audio_end: 
             if rms_val >= Threshold: audio_end = time.time() + TIMEOUT_LENGTH
             audio_current = time.time()
+            dg.send(audio) #send the audio to deepgram speech to text
             rec.append(audio)
 
         #process audio if we have an array of non-silent audio
         else:
             if len(rec)>0: 
-                
                 #Do TTS
-                tmp = io.BytesIO()        
-                tts = gTTS(text='I heard you say...', lang='en')  
-                tts.write_to_fp(tmp)
-                tmp.seek(0)                       
-                sound = AudioSegment.from_mp3(tmp)
-                tmp.close()
-                #you have to assign the set_frame_rate to a variable as it does not modify in place
-                sound = sound.set_frame_rate(16000)
-                #we get the converted bytes
-                out = sound.export(format="wav")
-                tts_dat = out.read()
-                out.close()
-                tts_dat = tts_dat[640:]
+                tts_dat = dg.speak("I heard you say...")
+                tts_dat = b''.join(tts_dat)
                 # chunk it and send it out
-                for i in range(0, len(tts_dat), 640):
+                for i in range(0, len(tts_dat), 640): #we send out the audio buffers 640 bytes at a time                    
                     chunk = (tts_dat[i:i+640])
-                    await ws.send_bytes(bytes(chunk))
+                    await ws.send_bytes(chunk)
 
                 #ECHO Audio
-                print("Echoing Audio", uuid)
+                # print("Echoing Audio", uuid)
 
                 output_audio = b''.join(rec) #get whatever we heard
                 #chunk it and send it out
@@ -190,7 +198,7 @@ async def echo_socket(ws: WebSocket):
                     chunk = (output_audio[i:i+640])
                     await ws.send_bytes(bytes(chunk))
                 
-                rec = [] #reset audio array to blank 
+                rec = [] #reset audio array to blank python -m pip install --upgrade pip
         
 
         #This parts handles DTMF input from users
@@ -217,24 +225,14 @@ async def echo_socket(ws: WebSocket):
 
                 #here you can do whatever you want with the DTMF, I'm letting the TTS speak the DTMF digits here
                 #Do TTS
-                tmp = io.BytesIO()
-                
-                tts = gTTS(text='DTMF Input is '+dtmf, lang='en')  
-                tts.write_to_fp(tmp)
-                tmp.seek(0)                       
-                sound = AudioSegment.from_mp3(tmp)
-                tmp.close()
-                #you have to assign the set_frame_rate to a variable as it does not modify in place
-                sound = sound.set_frame_rate(16000)
-                #we get the converted bytes
-                out = sound.export(format="wav")
-                tts_dat = out.read()
-                out.close()
-                tts_dat = tts_dat[640:]
+                tts_dat = dg.speak('DTMF Input is '+dtmf)
+                tts_dat = b''.join(tts_dat)
                 # chunk it and send it out
-                for i in range(0, len(tts_dat), 640):
+                for i in range(0, len(tts_dat), 640): #we send out the audio buffers 640 bytes at a time                    
                     chunk = (tts_dat[i:i+640])
-                    await ws.send_bytes(bytes(chunk))
+                    await ws.send_bytes(chunk)
+
+                
 
                
                 

@@ -7,8 +7,8 @@ from flask_sock import Sock
 from werkzeug.routing import Map, Rule
 import time, struct, math, json, io, os
 import vonage
-from gtts import gTTS
-from pydub import AudioSegment
+from deepgram_processor import dg
+dg = dg()
 app = Flask(__name__)
 sock = Sock(app)
 PORT = int(os.getenv('PORT', 3003))
@@ -43,7 +43,7 @@ def answer_call():
     ncco = [
         {
             "action": "talk",
-            "text": "Voice Echo and DTMF test. Speak after the Ding.",
+            "text": "Loading Demo",
         },
         {
             "action": "record",
@@ -71,9 +71,15 @@ def answer_call():
 
 
 @app.route("/webhooks/call-event", methods=["POST"])
-def events():
-    request_body = request.data.decode("utf-8")  # Assuming it's a text-based request body
-    print("Request Body:", request_body)
+def call_events():
+    #request_body = request.data.decode("utf-8")  # Assuming it's a text-based request body
+    #print("Request Body:", request_body)
+    return "200"
+
+@app.route("/webhooks/rtc-event", methods=["POST"])
+def RTC_events():
+    #request_body = request.data.decode("utf-8")  # Assuming it's a text-based request body
+    #print("Request Body:", request_body)
     return "200"
 
 @app.route("/webhooks/record-event", methods=["GET"])
@@ -109,6 +115,14 @@ def echo_socket(ws):
     dtmf_end = 0
     dtmf_received = None
 
+    #Do TTS
+    tts_dat = dg.speak("This is a Deepgram Speech to Text and Text to Speech with Voice Echo demo. Please speak after the ding.")
+    tts_dat = b''.join(tts_dat)
+    # chunk it and send it out
+    for i in range(0, len(tts_dat), 640): #we send out the audio buffers 640 bytes at a time                    
+        chunk = (tts_dat[i:i+640])
+        ws.send(chunk)
+
     #This part sends a wav file called ding.wav
     #we open the wav file
     with open("./ding.wav", "rb") as file:
@@ -119,7 +133,7 @@ def echo_socket(ws):
         chunk = (buffer[i:i+640])
         ws.send(bytes(chunk))
     
-
+    dg.start() #start deepgram
     #!!!This part will echo whatever the user says if it detects a pause!!!
     while True:
         received = ws.receive()
@@ -157,6 +171,7 @@ def echo_socket(ws):
         if current <= end: 
             if rms_val >= Threshold: end = time.time() + TIMEOUT_LENGTH
             current = time.time()
+            dg.send(audio) #send the audio to deepgram speech to text
             rec.append(audio)
 
         #process audio if we have an array of non-silent audio
@@ -164,23 +179,12 @@ def echo_socket(ws):
             if len(rec)>0: 
                 
                 #Do TTS
-                tmp = io.BytesIO()        
-                tts = gTTS(text='I heard you say...', lang='en')  
-                tts.write_to_fp(tmp)
-                tmp.seek(0)                       
-                sound = AudioSegment.from_mp3(tmp)
-                tmp.close()
-                #you have to assign the set_frame_rate to a variable as it does not modify in place
-                sound = sound.set_frame_rate(16000)
-                #we get the converted bytes
-                out = sound.export(format="wav")
-                tts_dat = out.read()
-                out.close()
+                tts_dat = dg.speak("I heard you say...")
+                tts_dat = b''.join(tts_dat)
                 # chunk it and send it out
-                tts_dat = tts_dat[640:]
-                for i in range(0, len(tts_dat), 640):
+                for i in range(0, len(tts_dat), 640): #we send out the audio buffers 640 bytes at a time                    
                     chunk = (tts_dat[i:i+640])
-                    ws.send(bytes(chunk))
+                    ws.send(chunk)
 
                 #ECHO Audio
                 print("Echoing Audio", uuid)
@@ -217,24 +221,13 @@ def echo_socket(ws):
 
                 #here you can do whatever you want with the DTMF, I'm letting the TTS speak the DTMF digits here
                 #Do TTS
-                tmp = io.BytesIO()
-                
-                tts = gTTS(text='DTMF Input is '+dtmf, lang='en')  
-                tts.write_to_fp(tmp)
-                tmp.seek(0)                       
-                sound = AudioSegment.from_mp3(tmp)
-                tmp.close()
-                #you have to assign the set_frame_rate to a variable as it does not modify in place
-                sound = sound.set_frame_rate(16000)
-                #we get the converted bytes
-                out = sound.export(format="wav")
-                tts_dat = out.read()
-                out.close()
-                tts_dat = tts_dat[640:]
+                tts_dat = dg.speak('DTMF Input is '+dtmf)
+                tts_dat = b''.join(tts_dat)
                 # chunk it and send it out
-                for i in range(0, len(tts_dat), 640):
+                for i in range(0, len(tts_dat), 640): #we send out the audio buffers 640 bytes at a time                    
                     chunk = (tts_dat[i:i+640])
-                    ws.send(bytes(chunk)) 
+                    ws.send(chunk)
+    dg.stop() #stop deepgram
 
 if __name__ == "__main__":
     server = pywsgi.WSGIServer(("0.0.0.0", PORT), app)

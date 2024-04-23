@@ -1,14 +1,22 @@
 
-# Python TTS and DTMF via websocket using Python GTTS Library with recording
+# Python STT and TTS via VAPI websocket using Deepgram with recording
 
-A sample app that shows how to use GTTS for TTS and how to record it.
+A sample app that shows how to use Deepgram for TTS and STT and how to record it.
 
 This sample also shows how to handle DTMF signals via Websocket.
 
 We have samples for Flask (`app.py`) and Fast API (`app_fast_api.py`)
 
-## Running
+## Setup and Running
 
+### Private Key
+- Generate aprivate key for you Vonage app and put it inside `private.key`
+
+### For Deepgram
+1. Register at [Deepgram](https://deepgram.com/) for a free account
+2. Generate an API Key
+3. Put your API Key Inside `depepgram_processor.py`, line 16
+4. Set the desired Speech-to-text language inisde `deepgram_processor.py` line 27
   
 ### Flask
 1. `pip install -r requirements.txt`
@@ -36,3 +44,8 @@ Set your Vonage callbacks to the following
 - Answer callback URL: GET {APP_URL}/webhooks/answer
 
 - Event URL: GET {APP_URL}/webhooks/call-event
+
+
+## Tunneling
+
+- [Ngrok](https://ngrok.com/) would be a good option.
