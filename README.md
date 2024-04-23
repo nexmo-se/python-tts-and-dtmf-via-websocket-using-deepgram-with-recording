@@ -9,6 +9,8 @@ We have samples for Flask (`app.py`) and Fast API (`app_fast_api.py`)
 
 ## Setup and Running
 
+### Requires Python 3.10+
+
 ### Private Key
 - Generate aprivate key for you Vonage app and put it inside `private.key`
 
