@@ -12,7 +12,7 @@ We have samples for Flask (`app.py`) and Fast API (`app_fast_api.py`)
 ### Requires Python 3.10+
 
 ### Private Key
-- Generate aprivate key for you Vonage app and put it inside `private.key`
+- Generate a private key for you Vonage app and put it inside `private.key`
 
 ### For Deepgram
 1. Register at [Deepgram](https://deepgram.com/) for a free account
